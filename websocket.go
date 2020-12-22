@@ -545,7 +545,10 @@ func (c *wsConn) handleWsConn(ctx context.Context) {
 		var timeoutCh <-chan time.Time
 		if timeoutTimer != nil {
 			if !timeoutTimer.Stop() {
-				<-timeoutTimer.C
+				select {
+				case <-timeoutTimer.C:
+				default:
+				}
 			}
 			timeoutTimer.Reset(c.timeout)
 
@@ -556,17 +559,13 @@ func (c *wsConn) handleWsConn(ctx context.Context) {
 		case r, ok := <-c.incoming:
 			if !ok {
 				if c.incomingErr != nil {
-					if !websocket.IsCloseError(c.incomingErr, websocket.CloseNormalClosure) {
-						log.Debugw("websocket error", "error", c.incomingErr)
+					log.Warnw("websocket error", "error", c.incomingErr)
+					if c.connFactory != nil {
 						// connection dropped unexpectedly, do our best to recover it
 						c.closeInFlight()
 						c.closeChans()
 						c.incoming = make(chan io.Reader) // listen again for responses
 						go func() {
-							if c.connFactory == nil { // likely the server side, don't try to reconnect
-								return
-							}
-
 							stopPings()
 
 							attempts := 0
@@ -575,7 +574,7 @@ func (c *wsConn) handleWsConn(ctx context.Context) {
 								time.Sleep(c.reconnectBackoff.next(attempts))
 								var err error
 								if conn, err = c.connFactory(); err != nil {
-									log.Debugw("websocket connection retry failed", "error", err)
+									log.Infow("websocket connection retry failed", "error", err)
 								}
 								select {
 								case <-ctx.Done():
@@ -652,6 +651,9 @@ func (c *wsConn) handleWsConn(ctx context.Context) {
 			}
 			c.writeLk.Unlock()
 			log.Errorw("Connection timeout", "remote", c.conn.RemoteAddr())
+			if c.connFactory != nil {
+				continue
+			}
 			return
 		case <-c.stop:
 			c.writeLk.Lock()
