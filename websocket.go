@@ -575,6 +575,8 @@ func (c *wsConn) handleWsConn(ctx context.Context) {
 								var err error
 								if conn, err = c.connFactory(); err != nil {
 									log.Infow("websocket connection retry failed", "error", err)
+								} else {
+									log.Infow("websocket connection retry successed", "attempts", attempts)
 								}
 								select {
 								case <-ctx.Done():
